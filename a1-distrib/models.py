@@ -7,8 +7,13 @@ from collections import Counter
 import re
 import numpy as np
 import spacy
+import nltk
 from nltk import bigrams
+from nltk.corpus import stopwords
 
+nlp = spacy.load('en_core_web_sm', disable=['tagger', 'parser', 'ner'])
+nltk.download('stopwords')
+stopWords = set(stopwords.words('english'))
 
 # sltk and spacy
 
@@ -50,15 +55,29 @@ class UnigramFeatureExtractor(FeatureExtractor):
         # Split into tokens
         # one word at a time
         features = Counter()
+        joinedSentence = nlp(" ".join(sentence))
 
-        for word in sentence:
-            # removes special characters
-            wordNoChar = re.sub(r"[^a-zA-Z0-9\-]", "", word)
-            wordNoChar = wordNoChar.capitalize()
-            if word in self.indexer.objs_to_ints or add_to_indexer:
-                index = self.indexer.add_and_get_index(word)
-                features[index] += 1
+        for word in joinedSentence:
+            wordStr = word.text.lower()
+            if word.is_alpha:                
+                if wordStr in self.indexer.objs_to_ints or add_to_indexer:
+                    index = self.indexer.add_and_get_index(wordStr)
+                    features[index] += 1
         return features
+
+        
+        # working old version:
+        # for word in sentence:
+        #     # removes special characters
+        #     wordNoChar = re.sub(r"[^a-zA-Z0-9\-]", "", word)
+        #     wordNoChar = wordNoChar.capitalize()
+        #     if word in self.indexer.objs_to_ints or add_to_indexer:
+        #         index = self.indexer.add_and_get_index(word)
+        #         features[index] += 1
+        # return features
+        
+
+        # old version (doesnt work):
         #     if wordNoChar:      # if not empty
         #         if add_to_indexer or not self.indexer.contains(wordNoChar):
         #             index = self.indexer.add_and_get_index(wordNoChar)
@@ -81,7 +100,18 @@ class BigramFeatureExtractor(FeatureExtractor):
         return self.indexer
     
     def extract_features(self, sentence: List[str], add_to_indexer: bool=False) -> Counter:
-        
+        features = Counter()
+        joinedSentence = nlp(" ".join(sentence))
+        tokens = [token.text for token in joinedSentence]
+        bigramList = list(bigrams(tokens))
+
+        for bigram in bigramList:
+            words = '_'.join(bigram)
+            if words in self.indexer.objs_to_ints or add_to_indexer:
+                index = self.indexer.add_and_get_index(words)
+                features[index] += 1
+        return features 
+                    
 
 
 
@@ -204,7 +234,7 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
         features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
         #print("*****Indexer size after processing training data:", len(feat_extractor.get_indexer().objs_to_ints))
         classifier.update_weights(ex.label, features)
-    
+        
     return classifier
 
 

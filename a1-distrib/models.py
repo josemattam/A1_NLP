@@ -1,15 +1,17 @@
 # models.py
 
+#from .sentiment_data import List
 from sentiment_data import *
 from utils import *
 
-from collections import Counter
-import re
+from collections import Counter, defaultdict
+# import re
 import numpy as np
 import spacy
 import nltk
 from nltk import bigrams
 from nltk.corpus import stopwords
+import math
 
 nlp = spacy.load('en_core_web_sm', disable=['tagger', 'parser', 'ner'])
 nltk.download('stopwords')
@@ -51,42 +53,16 @@ class UnigramFeatureExtractor(FeatureExtractor):
         return self.indexer
 
     def extract_features(self, sentence: List[str], add_to_indexer: bool=False) -> Counter:
-        # take input
-        # Split into tokens
-        # one word at a time
         features = Counter()
         joinedSentence = nlp(" ".join(sentence))
 
         for word in joinedSentence:
             wordStr = word.text.lower()
-            if word.is_alpha:                
-                if wordStr in self.indexer.objs_to_ints or add_to_indexer:
-                    index = self.indexer.add_and_get_index(wordStr)
-                    features[index] += 1
+            if self.indexer.contains(wordStr) or add_to_indexer:
+                index = self.indexer.add_and_get_index(wordStr)
+                features[index] += 1
         return features
 
-        
-        # working old version:
-        # for word in sentence:
-        #     # removes special characters
-        #     wordNoChar = re.sub(r"[^a-zA-Z0-9\-]", "", word)
-        #     wordNoChar = wordNoChar.capitalize()
-        #     if word in self.indexer.objs_to_ints or add_to_indexer:
-        #         index = self.indexer.add_and_get_index(word)
-        #         features[index] += 1
-        # return features
-        
-
-        # old version (doesnt work):
-        #     if wordNoChar:      # if not empty
-        #         if add_to_indexer or not self.indexer.contains(wordNoChar):
-        #             index = self.indexer.add_and_get_index(wordNoChar)
-        #         else:
-        #             index = self.indexer.index_of(wordNoChar)
-        #         features[index] += 1
-
-        # return features
-      
 
 
 class BigramFeatureExtractor(FeatureExtractor):
@@ -107,7 +83,7 @@ class BigramFeatureExtractor(FeatureExtractor):
 
         for bigram in bigramList:
             words = '_'.join(bigram)
-            if words in self.indexer.objs_to_ints or add_to_indexer:
+            if self.indexer.contains(words) or add_to_indexer:
                 index = self.indexer.add_and_get_index(words)
                 features[index] += 1
         return features 
@@ -119,8 +95,47 @@ class BetterFeatureExtractor(FeatureExtractor):
     """
     Better feature extractor...try whatever you can think of!
     """
-    def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+    def __init__(self, indexer: Indexer, train_exs: List[SentimentExample]):
+        self.indexer = indexer
+        self.idf = self.get_tf_idf(train_exs)
+
+    def get_indexer(self):
+        return self.indexer
+
+    def get_tf_idf(self, train_exs):
+        dict = defaultdict(int)
+        
+        for ex in train_exs:
+            seenWords = set()
+            for word in ex.words:
+                lowercaseWord = word.lower()
+                if lowercaseWord not in stopWords and lowercaseWord not in seenWords:
+                    seenWords.add(lowercaseWord)
+                    if not self.indexer.contains(lowercaseWord):
+                        self.indexer.add_and_get_index(lowercaseWord)
+                    dict[lowercaseWord] += 1
+
+                
+        return {self.indexer.index_of(word): math.log(len(train_exs) / (1 + count)) for word, count in dict.items()}
+
+
+
+    def extract_features(self, sentence: List[str], add_to_indexer: bool = False) -> Counter:
+        features = Counter()
+        tf = Counter(word.lower() for word in sentence if word.lower() not in stopWords)
+
+        for word, count in tf.items():
+            if add_to_indexer or self.indexer.contains(word):
+                index = self.indexer.add_and_get_index(word)
+                features[index] = (count / len(sentence) ) * self.idf.get(index, 0)
+        return features
+        
+
+
+
+    
+
+    
 
 
 class SentimentClassifier(object):
@@ -195,6 +210,7 @@ class LogisticRegressionClassifier(SentimentClassifier):
         self.feat_extractor = feat_extractor
         self.learning_rate = 0.001
         self.weights = np.zeros(feat_extractor.get_indexer().__len__())
+        
 
     
     def logistic_regression(self, x):
@@ -204,7 +220,7 @@ class LogisticRegressionClassifier(SentimentClassifier):
     def predict(self, sentence: List[str]) -> int:
         features = self.feat_extractor.extract_features(sentence) # doesnt add to indexer
         fvec = self.get_feature_vector_from_counter(features)
-        logreg = self.logistic_regression(np.dot(fvec, self.weights)) # prediction value = dot product
+        logreg = self.logistic_regression(np.dot(self.weights, fvec)) # prediction value = dot product
         if logreg > 0.5:
             return 1
         return 0
@@ -213,8 +229,8 @@ class LogisticRegressionClassifier(SentimentClassifier):
     def update_weights(self, y, features):
         fvec = self.get_feature_vector_from_counter(features)
         y_hat = np.dot(fvec, self.weights)
-        grad = fvec * (y - y_hat)
-        self.weights += self.learning_rate * grad    
+       # grad = fvec * (y - y_hat)
+        self.weights += self.learning_rate * (y - y_hat) * fvec    
 
     
 
@@ -232,7 +248,6 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
     classifier = PerceptronClassifier(feat_extractor)
     for ex in train_exs:
         features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
-        #print("*****Indexer size after processing training data:", len(feat_extractor.get_indexer().objs_to_ints))
         classifier.update_weights(ex.label, features)
         
     return classifier
@@ -252,7 +267,6 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     classifier = LogisticRegressionClassifier(feat_extractor)
     for ex in train_exs:
         features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
-        #print("*****Indexer size after processing training data:", len(feat_extractor.get_indexer().objs_to_ints))
         classifier.update_weights(ex.label, features)
     
     return classifier
@@ -279,7 +293,7 @@ def train_model(args, train_exs: List[SentimentExample], dev_exs: List[Sentiment
         feat_extractor = BigramFeatureExtractor(Indexer())
     elif args.feats == "BETTER":
         # Add additional preprocessing code here
-        feat_extractor = BetterFeatureExtractor(Indexer())
+        feat_extractor = BetterFeatureExtractor(Indexer(), train_exs)
     else:
         raise Exception("Pass in UNIGRAM, BIGRAM, or BETTER to run the appropriate system")
 

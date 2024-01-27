@@ -150,11 +150,8 @@ class SentimentClassifier(object):
         raise Exception("Don't call me, call my subclasses")
     
     def get_feature_vector_from_counter(self, features):
-        # print("Weights size:", len(self.weights))
-        # print("Features:", features)
 
         fvec = np.zeros(len(self.weights))
-        #print("###############\nfvec count:",len(fvec), "\nfeatures count:", len(features))
         for i, count in features.items():
             fvec[i] = count
         return fvec
@@ -227,10 +224,15 @@ class LogisticRegressionClassifier(SentimentClassifier):
     
 
     def update_weights(self, y, features):
+    #     fvec = self.get_feature_vector_from_counter(features)
+    #     y_hat = np.dot(fvec, self.weights)
+    #    # grad = fvec * (y - y_hat)
+    #     self.weights += self.learning_rate * (y - y_hat) * fvec    
+        
         fvec = self.get_feature_vector_from_counter(features)
-        y_hat = np.dot(fvec, self.weights)
-       # grad = fvec * (y - y_hat)
-        self.weights += self.learning_rate * (y - y_hat) * fvec    
+        y_hat = self.logistic_regression(np.dot(self.weights, fvec))
+        grad = fvec * (y - y_hat)
+        self.weights += self.learning_rate * grad
 
     
 
@@ -261,14 +263,20 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     :param feat_extractor: feature extractor to use
     :return: trained LogisticRegressionClassifier model
     """
-    for ex in train_exs:
-        feat_extractor.extract_features(ex.words, add_to_indexer=True)
-
+    epochs = 100
+    #learning_rate = 0.001
     classifier = LogisticRegressionClassifier(feat_extractor)
-    for ex in train_exs:
-        features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
-        classifier.update_weights(ex.label, features)
-    
+    featLen = feat_extractor.get_indexer().__len__()
+
+    for epoch in range(epochs):
+        for ex in train_exs:
+            features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
+            fvec = classifier.get_feature_vector_from_counter(features)
+
+            if featLen != len(fvec):
+                continue
+
+            classifier.update_weights(ex.label, features)
     return classifier
 
 

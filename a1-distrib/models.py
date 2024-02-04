@@ -230,8 +230,8 @@ class LogisticRegressionClassifier(SentimentClassifier):
     #     self.weights += self.learning_rate * (y - y_hat) * fvec    
         
         fvec = self.get_feature_vector_from_counter(features)
-        y_hat = self.logistic_regression(np.dot(self.weights, fvec))
-        grad = fvec * (y - y_hat)
+        y_hat = self.logistic_regression(np.dot(self.weights, fvec))  
+        grad = fvec * (y - y_hat)       
         self.weights += self.learning_rate * grad
 
     
